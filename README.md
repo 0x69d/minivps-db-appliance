@@ -13,6 +13,7 @@ db-1が担うのはMySQLの稼働と、seg1からの接続のみを受け付け�
 - mini-vps-platformがセットアップ済み(`~/.ssh/minivps_ed25519.pub`公開鍵、`seg2`ネットワーク、`images`ストレージプール、`ubuntu-26.04.img`が`images`プールに存在すること)。
 - [minivps-router-appliance](https://github.com/0x69d/minivps-router-appliance)のrouter-1が稼働し、3306の許可ルールが追記されていること。無いとforward chainの既定拒否でweb-1から届かない([router-1側の許可ルール](#router-1側の許可ルール)参照)。
 - ホストで`net.bridge.bridge-nf-call-iptables`が0であること。1だと送信元IPがホストに書き換えられ、この構成の到達制御が成立しない([送信元IPの保存](#送信元ipの保存)参照)。
+- `tests/check-mysql-conf.sh` を回す場合はホスト側に `mysql-server-core`。
 
 ## アーキテクチャ
 
@@ -94,14 +95,20 @@ sudo sysctl -w net.bridge.bridge-nf-call-iptables=0
 
 ```bash
 # 接続元はweb-1のIPに限定する。seg1全体を許可する場合は 'appuser'@'192.168.201.%'
-sudo mysql -e "
-  CREATE USER 'appuser'@'192.168.201.40' IDENTIFIED BY '<自分で決めたパスワード>';
-  CREATE DATABASE appdb;
-  GRANT ALL ON appdb.* TO 'appuser'@'192.168.201.40';
-  FLUSH PRIVILEGES;"
+# パスワードをコマンドラインに直接書くと ~/.bash_history に平文で残る。
+# read -s で受けて標準入力からmysqlへ流せば、履歴に残るのは変数名だけになる。
+# パスワードに ' や \ は使わない。IDENTIFIED BY '...' の引用が壊れるため。
+read -rsp 'appuser password: ' APPUSER_PW; echo
+sudo mysql <<SQL
+CREATE USER 'appuser'@'192.168.201.40' IDENTIFIED BY '${APPUSER_PW}';
+CREATE DATABASE appdb;
+GRANT ALL ON appdb.* TO 'appuser'@'192.168.201.40';
+FLUSH PRIVILEGES;
+SQL
+unset APPUSER_PW
 ```
 
-パスワードはリポジトリにもspecにも書かない。動作確認はweb-1から行う:
+パスワードはリポジトリにもspecにも書かない。動作確認はweb-1から行う(クライアントはminivps-web-applianceのゴールデンイメージに含まれる):
 
 ```bash
 mysql -h 192.168.202.50 -u appuser -p appdb -e 'select 1'
@@ -127,11 +134,12 @@ sudo systemctl reload nftables
 
 ## tests
 
-- `tests/lint-nftables.sh` — nftables.confの構文チェック。
+- `tests/lint-nftables.sh` — nftables.confの構文チェック(要`nft`・CAP_NET_ADMIN。sudoで実行する)。
+- `tests/check-mysql-conf.sh` — `zz-minivps.cnf`だけを読ませての`mysqld --validate-config`(要`mysql-server-core`)。
 
 ## トラブルシューティング
 
-- ビルドがタイムアウトした場合: `virsh console <ビルドVM名>` でシリアルコンソールに接続して調査する。ビルド用ドメインはtransientで、シャットダウンと同時に消滅する点に注意。
+- ビルドがタイムアウトした場合: 調査のためビルドVMとそのディスクは意図的に残される。表示されるSSH手順で `cloud-init status --long` と `/var/log/cloud-init-output.log` を確認する。cloud-initの初期段階で止まっているとSSHは通らないため、その場合は `virsh console <ビルドVM名>` でシリアルコンソールから調査する。調査後は `virsh destroy <ビルドVM名>` で破棄すれば、残骸は次回実行の冒頭掃除が回収する。
 - ホスト(192.168.202.1)から `mysql -h 192.168.202.50` がタイムアウトするのは仕様。ホストは管理ネットにもseg1にも該当しないため、db-1のinput chainで落ちる。動作確認はweb-1から行う。
 - web-1から繋がらない: まずdb-1で`sudo tcpdump -i enp2s0 tcp port 3306`を回しながらweb-1から接続する。パケットが届かなければ経路か[router-1側の許可ルール](#router-1側の許可ルール)の問題。届いているのに応答が無く、かつ送信元が192.168.201.40以外(192.168.202.1など)なら[送信元IPの保存](#送信元ipの保存)を参照する。送信元が正しければDBユーザーの接続元指定(`'appuser'@'192.168.201.40'`)との不一致を疑う。
 - `mini-vps status`が管理IP以外を返す場合: `specs/db-1.yaml`の`networks`の並び順(`default`が先頭かつ静的IPになっているか)を確認する。
