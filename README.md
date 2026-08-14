@@ -13,6 +13,7 @@ db-1が担うのはMySQLの稼働と、seg1からの接続のみを受け付け�
 - mini-vps-platformがセットアップ済み(`~/.ssh/minivps_ed25519.pub`公開鍵、`seg2`ネットワーク、`images`ストレージプール、`ubuntu-26.04.img`が`images`プールに存在すること)。
 - [minivps-router-appliance](https://github.com/0x69d/minivps-router-appliance)のrouter-1が稼働し、3306の許可ルールが追記されていること。無いとforward chainの既定拒否でweb-1から届かない([router-1側の許可ルール](#router-1側の許可ルール)参照)。
 - ホストで`net.bridge.bridge-nf-call-iptables`が0であること。1だと送信元IPがホストに書き換えられ、この構成の到達制御が成立しない([送信元IPの保存](#送信元ipの保存)参照)。
+- `tests/check-mysql-conf.sh` を回す場合はホスト側に `mysql-server-core`。
 
 ## アーキテクチャ
 
@@ -133,7 +134,8 @@ sudo systemctl reload nftables
 
 ## tests
 
-- `tests/lint-nftables.sh` — nftables.confの構文チェック。
+- `tests/lint-nftables.sh` — nftables.confの構文チェック(要`nft`・CAP_NET_ADMIN。sudoで実行する)。
+- `tests/check-mysql-conf.sh` — `zz-minivps.cnf`だけを読ませての`mysqld --validate-config`(要`mysql-server-core`)。
 
 ## トラブルシューティング
 
