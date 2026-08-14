@@ -94,14 +94,20 @@ sudo sysctl -w net.bridge.bridge-nf-call-iptables=0
 
 ```bash
 # 接続元はweb-1のIPに限定する。seg1全体を許可する場合は 'appuser'@'192.168.201.%'
-sudo mysql -e "
-  CREATE USER 'appuser'@'192.168.201.40' IDENTIFIED BY '<自分で決めたパスワード>';
-  CREATE DATABASE appdb;
-  GRANT ALL ON appdb.* TO 'appuser'@'192.168.201.40';
-  FLUSH PRIVILEGES;"
+# パスワードをコマンドラインに直接書くと ~/.bash_history に平文で残る。
+# read -s で受けて標準入力からmysqlへ流せば、履歴に残るのは変数名だけになる。
+# パスワードに ' や \ は使わない。IDENTIFIED BY '...' の引用が壊れるため。
+read -rsp 'appuser password: ' APPUSER_PW; echo
+sudo mysql <<SQL
+CREATE USER 'appuser'@'192.168.201.40' IDENTIFIED BY '${APPUSER_PW}';
+CREATE DATABASE appdb;
+GRANT ALL ON appdb.* TO 'appuser'@'192.168.201.40';
+FLUSH PRIVILEGES;
+SQL
+unset APPUSER_PW
 ```
 
-パスワードはリポジトリにもspecにも書かない。動作確認はweb-1から行う:
+パスワードはリポジトリにもspecにも書かない。動作確認はweb-1から行う(クライアントはminivps-web-applianceのゴールデンイメージに含まれる):
 
 ```bash
 mysql -h 192.168.202.50 -u appuser -p appdb -e 'select 1'
