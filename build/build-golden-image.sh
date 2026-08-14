@@ -108,11 +108,11 @@ write_files:
     permissions: '0640'
     encoding: b64
     content: $(b64 "$REPO_ROOT/image/etc/nftables.conf")
-  - path: /etc/mysql/mysql.conf.d/99-minivps.cnf
+  - path: /etc/mysql/mysql.conf.d/zz-minivps.cnf
     permissions: '0644'
     encoding: b64
     defer: true
-    content: $(b64 "$REPO_ROOT/image/etc/mysql/mysql.conf.d/99-minivps.cnf")
+    content: $(b64 "$REPO_ROOT/image/etc/mysql/mysql.conf.d/zz-minivps.cnf")
   - path: /root/golden-finalize.sh
     permissions: '0700'
     content: |

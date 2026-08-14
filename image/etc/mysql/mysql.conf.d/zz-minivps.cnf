@@ -1,5 +1,9 @@
 # minivps-db-appliance: MySQL のリッスン設定。
-# パッケージ同梱の mysqld.cnf より後に読まれる。
+#
+# ファイル名の zz- 接頭辞は必須。!includedir はディレクトリ内をアルファベット順に読み、
+# 同じオプションは後に読まれた方が勝つ。パッケージ同梱の mysqld.cnf が
+# bind-address = 127.0.0.1 を持つため、99- のような数字接頭辞だと mysqld.cnf より先に
+# 読まれて上書きされ、設定が黙って無効になる。
 
 [mysqld]
 # seg2側IP(192.168.202.50)に絞らず全アドレスでリッスンする。mysql.service の依存は
