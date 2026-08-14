@@ -1,0 +1,10 @@
+# minivps-db-appliance: MySQL のリッスン設定。
+# パッケージ同梱の mysqld.cnf より後に読まれる。
+
+[mysqld]
+# seg2側IP(192.168.202.50)に絞らず全アドレスでリッスンする。mysql.service の依存は
+# network.target 止まりで network-online.target を待たないため、netplanがアドレスを
+# 付ける前にmysqldが起動するとbindに失敗して起動しない。
+# 到達制御は /etc/nftables.conf の input chain が WEB_NET からの3306のみ許可することで
+# 担う。この2つは一組で、片方だけ変更するとどこからでも接続できる状態になる。
+bind-address = 0.0.0.0
