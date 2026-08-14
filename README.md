@@ -12,6 +12,7 @@ db-1が担うのはMySQLの稼働と、seg1からの接続のみを受け付け�
 
 - mini-vps-platformがセットアップ済み(`~/.ssh/minivps_ed25519.pub`公開鍵、`seg2`ネットワーク、`images`ストレージプール、`ubuntu-26.04.img`が`images`プールに存在すること)。
 - [minivps-router-appliance](https://github.com/0x69d/minivps-router-appliance)のrouter-1が稼働し、3306の許可ルールが追記されていること。無いとforward chainの既定拒否でweb-1から届かない([router-1側の許可ルール](#router-1側の許可ルール)参照)。
+- ホストで`net.bridge.bridge-nf-call-iptables`が0であること。1だと送信元IPがホストに書き換えられ、この構成の到達制御が成立しない([送信元IPの保存](#送信元ipの保存)参照)。
 
 ## アーキテクチャ
 
@@ -43,6 +44,23 @@ db-1はseg2への単一配置とし、web-1(192.168.201.40)からはrouter-1経�
 MySQLの`bind-address`は0.0.0.0のままにしている。mysql.serviceの依存は`network.target`止まりで`network-online.target`を待たないため、seg2側IPに絞るとnetplanがアドレスを付ける前の起動でbindに失敗しうるため。到達制御は上記のinput chainが担う。`image/etc/mysql/mysql.conf.d/zz-minivps.cnf`と`image/etc/nftables.conf`は一組で、片方だけ変更するとどこからでも接続できる状態になる。
 
 rootはUbuntu既定の`unix_socket`認証のままで、パスワードは焼き込まない。ローカルのSSH経由でのみ使うため。
+
+### 送信元IPの保存
+
+この構成の到達制御は、db-1に届くパケットの送信元がweb-1の192.168.201.40のままであることに依存している。router-1自身はSNATしない(`minivps-router-appliance`のrulesetは`table inet filter`のみでnatテーブルを持たない)が、ホスト側の設定次第で書き換わる。
+
+`br_netfilter`が有効でかつ`net.bridge.bridge-nf-call-iptables`が1だと、ブリッジ上のフレームがホストのnftablesを通り、libvirtがNATネットワークごとに持つmasqueradeルール(`ip saddr 192.168.201.0/24 ip daddr != 192.168.201.0/24 ... masquerade`)に一致してしまう。結果として送信元はセグメントのゲートウェイIP(192.168.201.1、さらにrouter-1通過後は192.168.202.1)に書き換えられ、
+
+- db-1のinput chainの`WEB_NET`許可に一致せず、接続が落ちる
+- 一致させたとしてもMySQL側の`'appuser'@'192.168.201.40'`に一致しない
+
+の2段で失敗する。ホスト側で無効化する:
+
+```bash
+sudo sysctl -w net.bridge.bridge-nf-call-iptables=0
+```
+
+`br_netfilter`はDockerが読み込み、この値を1にする。恒久化する場合はDockerのネットワーク分離に影響しうる点に注意する。0にすると送信元が保存され、db-1で`select user()`が`appuser@192.168.201.40`を返す。
 
 名前解決は管理NICの`nameservers`でdefaultセグメントのlibvirt dnsmasqを指定している。全NICが静的だとnetplanがリゾルバを持たず、運用者がaptを叩けなくなるため。
 
@@ -115,7 +133,7 @@ sudo systemctl reload nftables
 
 - ビルドがタイムアウトした場合: `virsh console <ビルドVM名>` でシリアルコンソールに接続して調査する。ビルド用ドメインはtransientで、シャットダウンと同時に消滅する点に注意。
 - ホスト(192.168.202.1)から `mysql -h 192.168.202.50` がタイムアウトするのは仕様。ホストは管理ネットにもseg1にも該当しないため、db-1のinput chainで落ちる。動作確認はweb-1から行う。
-- web-1から繋がらない: 経路とフィルタを切り分ける。web-1で`ip route get 192.168.202.50`を確認し、届かない場合は[router-1側の許可ルール](#router-1側の許可ルール)の追記漏れを疑う。DBユーザーの接続元指定(`'appuser'@'192.168.201.40'`)がweb-1のIPと一致しているかも確認する。
+- web-1から繋がらない: まずdb-1で`sudo tcpdump -i enp2s0 tcp port 3306`を回しながらweb-1から接続する。パケットが届かなければ経路か[router-1側の許可ルール](#router-1側の許可ルール)の問題。届いているのに応答が無く、かつ送信元が192.168.201.40以外(192.168.202.1など)なら[送信元IPの保存](#送信元ipの保存)を参照する。送信元が正しければDBユーザーの接続元指定(`'appuser'@'192.168.201.40'`)との不一致を疑う。
 - `mini-vps status`が管理IP以外を返す場合: `specs/db-1.yaml`の`networks`の並び順(`default`が先頭かつ静的IPになっているか)を確認する。
 - ゴールデンイメージには`/etc/mysql/debian.cnf`にパッケージ生成の`debian-sys-maint`パスワードが含まれる。`.gitignore`が`*.qcow2`を除外するのでgitには入らないが、イメージファイル自体を配布する場合は注意する。
 - DHCPレンジとの重複: 192.168.202.50/192.168.122.50はいずれもlibvirt DHCPレンジ(.2〜.254)内にある。db-1は常時起動の運用を前提とし、長期停止させる場合は同アドレスのDHCP払い出しと衝突しうる点に注意する。
