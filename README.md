@@ -11,6 +11,7 @@ db-1が担うのはMySQLの稼働と、seg1からの接続のみを受け付け�
 ## 前提条件
 
 - mini-vps-platformがセットアップ済み(`~/.ssh/minivps_ed25519.pub`公開鍵、`seg2`ネットワーク、`images`ストレージプール、`ubuntu-26.04.img`が`images`プールに存在すること)。
+- セグメントは mini-vps-platform の既定では作られない。`ansible/vars/network_segments.yml` で定義して playbook を実行する(同ファイルに3セグメント構成の例をコメントで同梱)。
 - [minivps-router-appliance](https://github.com/0x69d/minivps-router-appliance)のrouter-1が稼働し、3306の許可ルールが追記されていること。無いとforward chainの既定拒否でweb-1から届かない([router-1側の許可ルール](#router-1側の許可ルール)参照)。
 - ホストで`net.bridge.bridge-nf-call-iptables`が0であること。1だと送信元IPがホストに書き換えられ、この構成の到達制御が成立しない([送信元IPの保存](#送信元ipの保存)参照)。
 - `tests/check-mysql-conf.sh` を回す場合はホスト側に `mysql-server-core`。
@@ -40,9 +41,11 @@ flowchart TB
 
 db-1はseg2への単一配置とし、web-1(192.168.201.40)からはrouter-1経由で到達させる。このためspecにseg1宛の戻り経路(`static_routes: via 192.168.202.10`)を宣言している。これが無いと、接続はweb-1→router-1→db-1と届くのに、応答がデフォルトルートへ非対称に流れて返らない。
 
-受信制御: specの`filters`は未設定とし、router-1/dns-1と同様、ゴールデンイメージに焼き込んだゲスト内nftablesのinput chainが受信制御を担う。3306はseg1(192.168.201.0/24)から、22/tcpは管理ネット(192.168.122.0/24)からのみ許可、診断用ICMP許可、他はデフォルト拒否。
+受信制御: specの`filters`は未設定とし、router-1/dns-1と同様、ゴールデンイメージに焼き込んだゲスト内nftablesのinput chainが受信制御を担う。22/tcpは管理ネット(192.168.122.0/24)からのみ許可、診断用ICMP許可、他はデフォルト拒否。
 
-MySQLの`bind-address`は0.0.0.0のままにしている。mysql.serviceの依存は`network.target`止まりで`network-online.target`を待たないため、seg2側IPに絞るとnetplanがアドレスを付ける前の起動でbindに失敗しうるため。到達制御は上記のinput chainが担う。`image/etc/mysql/mysql.conf.d/zz-minivps.cnf`と`image/etc/nftables.conf`は一組で、片方だけ変更するとどこからでも接続できる状態になる。
+3306の許可元だけは構成によって変わるため、router-1と同型に`/etc/nftables.d/90-db-allow.conf`へ分離してある。既定はseg1(192.168.201.0/24)からのみ。セグメントを分けない構成なら許可元を書き換える。イメージ再ビルドは要らず、編集して`sudo systemctl reload nftables`で反映する。
+
+MySQLの`bind-address`は0.0.0.0のままにしている。mysql.serviceの依存は`network.target`止まりで`network-online.target`を待たないため、seg2側IPに絞るとnetplanがアドレスを付ける前の起動でbindに失敗しうるため。到達制御は上記のinput chainが担う。`image/etc/mysql/mysql.conf.d/zz-minivps.cnf`と`image/etc/nftables.d/90-db-allow.conf`は一組で、片方だけ変更するとどこからでも接続できる、あるいは誰も繋がらない状態になる。
 
 rootはUbuntu既定の`unix_socket`認証のままで、パスワードは焼き込まない。ローカルのSSH経由でのみ使うため。
 
@@ -52,7 +55,7 @@ rootはUbuntu既定の`unix_socket`認証のままで、パスワードは焼き
 
 `br_netfilter`が有効でかつ`net.bridge.bridge-nf-call-iptables`が1だと、ブリッジ上のフレームがホストのnftablesを通り、libvirtがNATネットワークごとに持つmasqueradeルール(`ip saddr 192.168.201.0/24 ip daddr != 192.168.201.0/24 ... masquerade`)に一致してしまう。結果として送信元はセグメントのゲートウェイIP(192.168.201.1、さらにrouter-1通過後は192.168.202.1)に書き換えられ、
 
-- db-1のinput chainの`WEB_NET`許可に一致せず、接続が落ちる
+- `90-db-allow.conf`の許可元に一致せず、接続が落ちる
 - 一致させたとしてもMySQL側の`'appuser'@'192.168.201.40'`に一致しない
 
 の2段で失敗する。ホスト側で無効化する:
