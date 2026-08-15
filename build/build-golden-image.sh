@@ -114,6 +114,10 @@ write_files:
     permissions: '0640'
     encoding: b64
     content: $(b64 "$REPO_ROOT/image/etc/nftables.conf")
+  - path: /etc/nftables.d/90-db-allow.conf
+    permissions: '0640'
+    encoding: b64
+    content: $(b64 "$REPO_ROOT/image/etc/nftables.d/90-db-allow.conf")
   - path: /etc/mysql/mysql.conf.d/zz-minivps.cnf
     permissions: '0644'
     encoding: b64
